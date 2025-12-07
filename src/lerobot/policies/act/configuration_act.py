@@ -124,6 +124,11 @@ class ACTConfig(PreTrainedConfig):
     latent_dim: int = 32
     n_vae_encoder_layers: int = 4
 
+    # Language conditioning.
+    use_language_conditioning: bool = False
+    language_encoder: str = "distilbert-base-uncased"
+    language_hidden_dim: int = 768
+
     # Inference.
     # Note: the value used in ACT when temporal ensembling is enabled is 0.01.
     temporal_ensemble_coeff: float | None = None
