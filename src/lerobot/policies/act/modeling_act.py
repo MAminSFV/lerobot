@@ -32,10 +32,18 @@ import torchvision
 from torch import Tensor, nn
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.misc import FrozenBatchNorm2d
+from transformers import AutoModel
 
 from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
-from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
+from lerobot.utils.constants import (
+    ACTION,
+    OBS_ENV_STATE,
+    OBS_IMAGES,
+    OBS_LANGUAGE_ATTENTION_MASK,
+    OBS_LANGUAGE_TOKENS,
+    OBS_STATE,
+)
 
 
 class ACTPolicy(PreTrainedPolicy):
@@ -330,6 +338,20 @@ class ACT(nn.Module):
             # Note: The forward method of this returns a dict: {"feature_map": output}.
             self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
 
+        if self.config.use_language_conditioning:
+            # Text encoder for encoding tokenized language instructions
+            self.text_encoder = AutoModel.from_pretrained(config.language_encoder)
+            # Freeze text encoder
+            for param in self.text_encoder.parameters():
+                param.requires_grad = False
+
+            self.encoder_text_input_proj = nn.Linear(config.language_hidden_dim, config.dim_model)
+
+            # Max length for text tokens (must match processor's max_length)
+            # TODO(Amin): Right now, this is hardcoded in two files, which is not good.
+            self.max_text_len = 20
+            self.encoder_text_pos_embed = nn.Embedding(self.max_text_len, config.dim_model)
+
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
         self.decoder = ACTDecoder(config)
@@ -463,6 +485,43 @@ class ACT(nn.Module):
         # Environment state token.
         if self.config.env_state_feature:
             encoder_in_tokens.append(self.encoder_env_state_input_proj(batch[OBS_ENV_STATE]))
+
+        if self.config.use_language_conditioning:
+            # Read pre-tokenized language data from the processor pipeline
+            if OBS_LANGUAGE_TOKENS in batch:
+                input_ids = batch[OBS_LANGUAGE_TOKENS]
+                attention_mask = batch.get(OBS_LANGUAGE_ATTENTION_MASK, None)
+
+                # Ensure input_ids has batch dimension
+                if input_ids.dim() == 1:
+                    input_ids = input_ids.unsqueeze(0)
+                if attention_mask is not None and attention_mask.dim() == 1:
+                    attention_mask = attention_mask.unsqueeze(0)
+
+                # Pass through frozen text encoder
+                with torch.no_grad():
+                    if attention_mask is not None:
+                        text_outputs = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
+                    else:
+                        text_outputs = self.text_encoder(input_ids=input_ids)
+
+                # last_hidden_state: (B, Seq, Hidden)
+                text_features = text_outputs.last_hidden_state
+
+                # Project: (B, Seq, DimModel)
+                text_features = self.encoder_text_input_proj(text_features)
+
+                # Permute for ACT encoder: (Seq, B, DimModel)
+                text_features = text_features.permute(1, 0, 2)
+
+                # Positional embeddings
+                seq_len = text_features.shape[0]
+                # Keep as (Seq, 1, Dim) to match other pos embeds
+                text_pos_embed = self.encoder_text_pos_embed.weight[:seq_len].unsqueeze(1)
+
+                # Add to tokens
+                encoder_in_tokens.extend(text_features.unbind(0))
+                encoder_in_pos_embed.extend(text_pos_embed.unbind(0))
 
         if self.config.image_features:
             # For a list of images, the H and W may vary but H*W is constant.
