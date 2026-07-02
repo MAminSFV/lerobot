@@ -12,6 +12,12 @@ Developers and researchers can post-train GR00T N1.5 with their own real or synt
 
 GR00T N1.5 (specifically the GR00T-N1.5-3B model) is built using pre-trained vision and language encoders. It utilizes a flow matching action transformer to model a chunk of actions, conditioned on vision, language, and proprioception.
 
+<img
+  src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/lerobot/lerobot-groot-paper1%20(1).png"
+  alt="An overview of GR00T"
+  width="80%"
+/>
+
 Its strong performance comes from being trained on an expansive and diverse humanoid dataset, which includes:
 
 - Real captured data from robots.
@@ -99,11 +105,13 @@ These results demonstrate GR00T's strong generalization capabilities across dive
 
 ### Evaluate in your hardware setup
 
-Once you have trained your model using your parameters you can run inference in your downstream task. Follow the instructions in [Imitation Learning for Robots](./il_robots). For example:
+Once you have trained your model using your parameters you can run inference in your downstream task. Follow the instructions in [Policy Deployment (lerobot-rollout)](./inference). For example:
 
 ```bash
-lerobot-record \
-  --robot.type=bi_so100_follower \
+lerobot-rollout\
+  --strategy.type=sentry \
+  --strategy.upload_every_n_episodes=5 \
+  --robot.type=bi_so_follower \
   --robot.left_arm_port=/dev/ttyACM1 \
   --robot.right_arm_port=/dev/ttyACM0 \
   --robot.id=bimanual_follower \
@@ -113,13 +121,14 @@ lerobot-record \
   }' \
   --display_data=true \
   --dataset.repo_id=<user>/eval_groot-bimanual  \
-  --dataset.num_episodes=10 \
-  --dataset.single_task="Grab and handover the red cube to the other arm"
-  --policy.path=<user>/groot-bimanual # your trained model
-  --dataset.episode_time_s=30
-  --dataset.reset_time_s=10
+  --dataset.single_task="Grab and handover the red cube to the other arm" \
+  --dataset.streaming_encoding=true \
+  --dataset.encoder_threads=2 \
+  # --dataset.rgb_encoder.vcodec=auto \
+  --policy.path=<user>/groot-bimanual \ # your trained model
+  --duration=600
 ```
 
 ## License
 
-This model follows the **Apache 2.0 License**, consistent with the original [GR00T repository](https://github.com/NVIDIA/Isaac-GR00T).
+This model follows NVIDIA's proprietary license, consistent with the original [GR00T repository](https://github.com/NVIDIA/Isaac-GR00T). Future versions (starting from N1.7) will follow **Apache 2.0 License**.
